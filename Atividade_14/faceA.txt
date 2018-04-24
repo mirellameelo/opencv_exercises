@@ -1,0 +1,120 @@
+//FUNCIONANDO 
+
+#include <stdio.h>
+#include <iostream>
+#include <opencv2/xfeatures2d.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/core/core.hpp>
+#include <opencv2/features2d/features2d.hpp>
+
+using namespace std;
+using namespace cv;
+using namespace cv::xfeatures2d;
+
+//Load two images
+//Detect keypoints in each image
+//Extract SIFT features for those keypoints
+//Find the closest matching features between the two images
+//Display the images side - by - side and draw lines connecting the matching features
+
+
+int main(int argc, char** argv) {
+
+	Mat scene = imread("caixa.jpg");
+	resize(scene, scene, Size(500, 500));
+	Mat faceA = imread("A.jpg");
+	resize(faceA, faceA, Size(500, 500));
+	Mat faceD = imread("D.jpg");
+	resize(faceD, faceD, Size(300, 500));
+	Mat desc_scene, descA, descD;
+	Mat output_image;
+
+	vector<KeyPoint> keypoints_scene, keypoints_faceA, keypoints_faceD;
+	Ptr<SIFT>detector = SIFT::create();
+
+	detector->detectAndCompute(scene, Mat(), keypoints_scene, desc_scene);
+	detector->detectAndCompute(faceA, Mat(), keypoints_faceA, descA);
+	detector->detectAndCompute(faceD, Mat(), keypoints_faceD, descD);
+
+
+	//match
+	FlannBasedMatcher matcher;
+
+	//A
+	vector< DMatch > matches_scene_A, matches_scene_D;
+	matcher.match(descA, desc_scene, matches_scene_A);
+	matcher.match(descA, desc_scene, matches_scene_D);
+
+	double max_dist = 0;
+	double min_dist = 100;
+
+	//calculation of max and min distances between keypoints
+	for (int i = 0; i < descA.rows; i++) {
+		double dist = matches_scene_A[i].distance;
+		if (dist < min_dist)
+			min_dist = dist;
+		else if (dist > max_dist)
+			max_dist = dist;
+	}
+
+	vector< DMatch > good_matches;
+
+	for (int i = 0; i < descA.rows; i++) {
+		if (matches_scene_A[i].distance <= max(2 * min_dist, 0.02))
+			good_matches.push_back(matches_scene_A[i]);
+	}
+
+	drawMatches(faceA, keypoints_faceA, scene, keypoints_scene, good_matches, output_image,
+		Scalar::all(-1), Scalar::all(-1), vector<char>(), DrawMatchesFlags::DEFAULT);
+
+	vector<Point2d> matches_A_2D;
+	vector<Point2d> matches_scene_2D;
+
+	for (int i = 0; i < good_matches.size(); i++){
+		//-- Get the keypoints from the good matches
+		matches_A_2D.push_back(keypoints_faceA[good_matches[i].queryIdx].pt);
+		matches_scene_2D.push_back(keypoints_scene[good_matches[i].trainIdx].pt);
+	}
+
+	vector<Point3d> matches_A_3D;
+
+	for (int i = 0; i < matches_A_2D.size(); i++) {
+		matches_A_3D.push_back(Point3d((int)matches_A_2D[i].x, (int)matches_A_2D[i].y, 300));
+	}
+
+	//Camera settings
+	double focal_length = 5100; // Approximate focal length.
+	Point2d center = Point2d(5100 / 2, 2900 / 2);
+	Mat camera_matrix = (Mat_<double>(3, 3) << focal_length, 0, center.x, 0, focal_length, center.y, 0, 0, 1);
+	// Assuming no lens distortion
+	Mat dist_coeffs = Mat::zeros(4, 1, cv::DataType<double>::type);
+
+	Mat rotation_vector; 
+	Mat translation_vector;
+
+	solvePnP(matches_A_3D, matches_scene_2D, camera_matrix, dist_coeffs, 
+		rotation_vector, translation_vector);
+
+	vector<Point2d> A_2D, D_2D;
+	projectPoints(matches_A_3D, rotation_vector, translation_vector,
+		camera_matrix, dist_coeffs, A_2D);
+
+	for (int i = 0; i < matches_scene_2D.size(); i++){
+		circle(scene, matches_scene_2D[i], 2, Scalar(0, 0, 255), -1);
+	}
+
+	line(scene, matches_scene_2D[5], A_2D[5], cv::Scalar(255, 0, 0), 2);
+
+	imshow("mirella", faceA);
+	imshow("mirella1", faceD);
+	imshow("mirella2", output_image);
+	imshow("mirella3", scene);
+	
+	waitKey(0);
+	return 0;
+
+
+}
